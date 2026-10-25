@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Ханойская башня</title>
+<style>
+  body { font-family: system-ui, sans-serif; background:#1e1e2e; color:#cdd6f4;
+         display:flex; flex-direction:column; align-items:center; padding:20px; }
+  h1 { margin:10px 0; }
+  #info { margin-bottom:15px; }
+  #board { display:flex; gap:20px; align-items:flex-end; height:280px;
+           padding:20px; background:#313244; border-radius:12px; }
+  .rod { width:220px; height:100%; display:flex; flex-direction:column-reverse;
+         align-items:center; justify-content:flex-start; position:relative;
+         cursor:pointer; border-radius:8px; padding-bottom:10px; }
+  .rod::before { content:""; position:absolute; bottom:10px; width:8px;
+                 height:240px; background:#6c7086; border-radius:4px; }
+  .rod.selected { outline:2px dashed #f9e2af; }
+  .disk { height:24px; border-radius:6px; position:relative; z-index:1;
+          margin-bottom:2px; }
+  #msg { margin-top:15px; min-height:24px; }
+  button { margin-top:15px; padding:10px 20px; background:#89b4fa; color:#1e1e2e;
+           border:none; border-radius:8px; font-weight:bold; cursor:pointer; }
+</style>
+</head>
+<body>
+<h1>Ханойская башня</h1>
+<div id="info">Комната: <b id="room"></b> · Ходов: <span id="moves">0</span></div>
+<div id="board">
+  <div class="rod" data-rod="0"></div>
+  <div class="rod" data-rod="1"></div>
+  <div class="rod" data-rod="2"></div>
+</div>
+<div id="msg"></div>
+<button id="reset">Сбросить</button>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket = io();
+const DISK_COUNT = 4;
+const COLORS = ['#f38ba8','#fab387','#f9e2af','#a6e3a1','#89b4fa','#cba6f7'];
+let selectedRod = null;
+let state = null;
+
+// Комната из URL: ?room=player1
+const params = new URLSearchParams(location.search);
+const roomId = params.get('room') || 'default';
+document.getElementById('room').textContent = roomId;
+socket.emit('join', { roomId });
+
+socket.on('state', (s) => {
+  state = s;
+  render();
+});
+
+socket.on('error-msg', (text) => {
+  showMsg(text, '#f38ba8');
+});
+
+function render() {
+  if (!state) return;
+  document.getElementById('moves').textContent = state.moves;
+  document.querySelectorAll('.rod').forEach((el, i) => {
+    el.innerHTML = '';
+    el.classList.toggle('selected', selectedRod === i);
+    state.rods[i].forEach((size, idx) => {
+      const d = document.createElement('div');
+      d.className = 'disk';
+      d.style.width = (40 + size * (180 / DISK_COUNT)) + 'px';
+      d.style.background = COLORS[(size - 1) % COLORS.length];
+      if (selectedRod === i && idx === state.rods[i].length - 1)
+        d.style.transform = 'translateY(-8px)';
+      el.appendChild(d);
+    });
+  });
+  if (state.solved) showMsg(`Победа! Решено за ${state.moves} ходов.`, '#a6e3a1');
+}
+
+document.querySelectorAll('.rod').forEach(el => {
+  el.addEventListener('click', () => {
+    const idx = Number(el.dataset.rod);
+    if (selectedRod === null) {
+      if (!state || state.rods[idx].length === 0) { showMsg('Здесь нет дисков.'); return; }
+      selectedRod = idx;
+      render();
+    } else if (selectedRod === idx) {
+      selectedRod = null; render();
+    } else {
+      socket.emit('move', { from: selectedRod, to: idx });
+      selectedRod = null;
+      render();
+    }
+  });
+});
+
+document.getElementById('reset').addEventListener('click', () => {
+  socket.emit('reset');
+  selectedRod = null;
+});
+
+function showMsg(text, color = '#fab387') {
+  const el = document.getElementById('msg');
+  el.textContent = text;
+  el.style.color = color;
+}
+</script>
+</body>
+</html>

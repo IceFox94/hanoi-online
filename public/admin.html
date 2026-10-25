@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Админ · Ханойская башня</title>
+<style>
+  body { font-family: system-ui, sans-serif; background:#1e1e2e; color:#cdd6f4; padding:20px; }
+  h1 { margin-top:0; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap:16px; }
+  .card { background:#313244; border-radius:12px; padding:16px; }
+  .card h3 { margin:0 0 8px; font-size:16px; }
+  .card .solved { color:#a6e3a1; }
+  .card .open { color:#f9e2af; }
+  .rods { display:flex; gap:8px; margin-top:10px; font-size:13px; color:#a6adc8; }
+  .rods span { background:#45475a; padding:4px 8px; border-radius:6px; }
+</style>
+</head>
+<body>
+<h1>Админ-панель</h1>
+<div id="status">Подключение...</div>
+<div class="grid" id="grid"></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket = io();
+socket.emit('admin:subscribe');
+
+socket.on('admin:update', (rooms) => {
+  const status = document.getElementById('status');
+  status.textContent = rooms.length
+    ? `Активных комнат: ${rooms.length}`
+    : 'Пока нет активных комнат';
+
+  const grid = document.getElementById('grid');
+  grid.innerHTML = '';
+  rooms.forEach(r => {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <h3>${r.roomId}</h3>
+      <div class="${r.solved ? 'solved' : 'open'}">
+        ${r.solved ? 'Решено' : 'В процессе'}
+      </div>
+      <div>Игроков: ${r.players} · Ходов: ${r.moves}</div>
+      <div class="rods">
+        ${r.rods.map((rod, i) => `<span>${i + 1}: ${rod.join(',') || '—'}</span>`).join('')}
+      </div>
+    `;
+    grid.appendChild(card);
+  });
+});
+</script>
+</body>
+</html>
