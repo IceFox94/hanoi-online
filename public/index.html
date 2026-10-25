@@ -21,11 +21,25 @@
   #msg { margin-top:15px; min-height:24px; }
   button { margin-top:15px; padding:10px 20px; background:#89b4fa; color:#1e1e2e;
            border:none; border-radius:8px; font-weight:bold; cursor:pointer; }
+
+  /* модальные окна */
+  .modal { position:fixed; inset:0; background:rgba(0,0,0,.6);
+           display:none; align-items:center; justify-content:center; z-index:10; }
+  .modal.open { display:flex; }
+  .modal-box { background:#313244; padding:24px; border-radius:12px;
+               min-width:280px; text-align:center; }
+  .modal-box h2 { margin:0 0 16px; }
+  .modal-box input { width:100%; padding:10px; border-radius:8px;
+                     border:none; margin-bottom:12px; font-size:16px; box-sizing:border-box; }
 </style>
 </head>
 <body>
 <h1>Ханойская башня</h1>
-<div id="info">Комната: <b id="room"></b> · Ходов: <span id="moves">0</span></div>
+<div id="info">
+  Комната: <b id="room"></b> · Игрок: <b id="me">—</b> ·
+  Ходов: <span id="moves">0</span>
+</div>
+<div id="players" style="font-size:13px;color:#a6adc8;margin-bottom:10px;"></div>
 <div id="board">
   <div class="rod" data-rod="0"></div>
   <div class="rod" data-rod="1"></div>
@@ -34,6 +48,24 @@
 <div id="msg"></div>
 <button id="reset">Сбросить</button>
 
+<!-- Ввод имени -->
+<div class="modal" id="nameModal">
+  <div class="modal-box">
+    <h2>Как вас зовут?</h2>
+    <input id="nameInput" maxlength="30" placeholder="Ваше имя" />
+    <button id="nameSubmit">Войти</button>
+  </div>
+</div>
+
+<!-- Победа -->
+<div class="modal" id="winModal">
+  <div class="modal-box">
+    <h2>🎉 Победа!</h2>
+    <p id="winText"></p>
+    <button id="winClose">Закрыть</button>
+  </div>
+</div>
+
 <script src="/socket.io/socket.io.js"></script>
 <script>
 const socket = io();
@@ -41,25 +73,50 @@ const DISK_COUNT = 4;
 const COLORS = ['#f38ba8','#fab387','#f9e2af','#a6e3a1','#89b4fa','#cba6f7'];
 let selectedRod = null;
 let state = null;
+let myName = sessionStorage.getItem('hanoi_name') || '';
 
-// Комната из URL: ?room=player1
 const params = new URLSearchParams(location.search);
 const roomId = params.get('room') || 'default';
 document.getElementById('room').textContent = roomId;
-socket.emit('join', { roomId });
+
+// Показываем ввод имени, если его ещё нет
+if (myName) {
+  doJoin(myName);
+} else {
+  document.getElementById('nameModal').classList.add('open');
+}
+
+document.getElementById('nameSubmit').addEventListener('click', () => {
+  const val = document.getElementById('nameInput').value.trim();
+  if (!val) return;
+  myName = val;
+  sessionStorage.setItem('hanoi_name', myName);
+  document.getElementById('nameModal').classList.remove('open');
+  doJoin(myName);
+});
+
+document.getElementById('nameInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('nameSubmit').click();
+});
+
+function doJoin(name) {
+  document.getElementById('me').textContent = name;
+  socket.emit('join', { roomId, name });
+}
 
 socket.on('state', (s) => {
   state = s;
   render();
 });
 
-socket.on('error-msg', (text) => {
-  showMsg(text, '#f38ba8');
-});
+socket.on('error-msg', (text) => showMsg(text, '#f38ba8'));
 
 function render() {
   if (!state) return;
   document.getElementById('moves').textContent = state.moves;
+  document.getElementById('players').textContent =
+    state.players.length ? 'В комнате: ' + state.players.join(', ') : '';
+
   document.querySelectorAll('.rod').forEach((el, i) => {
     el.innerHTML = '';
     el.classList.toggle('selected', selectedRod === i);
@@ -73,14 +130,27 @@ function render() {
       el.appendChild(d);
     });
   });
-  if (state.solved) showMsg(`Победа! Решено за ${state.moves} ходов.`, '#a6e3a1');
+
+  // Победа — показываем модалку один раз
+  if (state.solved && !window.__winShown) {
+    window.__winShown = true;
+    document.getElementById('winText').textContent =
+      `Вы собрали башню за ${state.moves} ходов.`;
+    document.getElementById('winModal').classList.add('open');
+  }
+  if (!state.solved) window.__winShown = false;
 }
+
+document.getElementById('winClose').addEventListener('click', () => {
+  document.getElementById('winModal').classList.remove('open');
+});
 
 document.querySelectorAll('.rod').forEach(el => {
   el.addEventListener('click', () => {
+    if (!state) return;
     const idx = Number(el.dataset.rod);
     if (selectedRod === null) {
-      if (!state || state.rods[idx].length === 0) { showMsg('Здесь нет дисков.'); return; }
+      if (state.rods[idx].length === 0) { showMsg('Здесь нет дисков.'); return; }
       selectedRod = idx;
       render();
     } else if (selectedRod === idx) {

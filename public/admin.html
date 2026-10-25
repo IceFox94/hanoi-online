@@ -7,12 +7,32 @@
   body { font-family: system-ui, sans-serif; background:#1e1e2e; color:#cdd6f4; padding:20px; }
   h1 { margin-top:0; }
   .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap:16px; }
-  .card { background:#313244; border-radius:12px; padding:16px; }
+  .card { background:#313244; border-radius:12px; padding:16px; cursor:pointer;
+          transition: transform .1s; }
+  .card:hover { transform: translateY(-2px); outline:1px solid #89b4fa; }
   .card h3 { margin:0 0 8px; font-size:16px; }
   .card .solved { color:#a6e3a1; }
   .card .open { color:#f9e2af; }
   .rods { display:flex; gap:8px; margin-top:10px; font-size:13px; color:#a6adc8; }
   .rods span { background:#45475a; padding:4px 8px; border-radius:6px; }
+
+  .modal { position:fixed; inset:0; background:rgba(0,0,0,.7);
+           display:none; align-items:center; justify-content:center; z-index:10; }
+  .modal.open { display:flex; }
+  .modal-box { background:#1e1e2e; padding:24px; border-radius:12px;
+               max-width:90vw; max-height:90vh; overflow:auto; }
+  .modal-box h2 { margin:0 0 8px; }
+  .modal-box .sub { color:#a6adc8; margin-bottom:16px; font-size:14px; }
+  #viewBoard { display:flex; gap:20px; align-items:flex-end; height:280px;
+               padding:20px; background:#313244; border-radius:12px; }
+  .view-rod { width:180px; height:100%; display:flex; flex-direction:column-reverse;
+              align-items:center; justify-content:flex-start; position:relative;
+              padding-bottom:10px; }
+  .view-rod::before { content:""; position:absolute; bottom:10px; width:8px;
+                      height:240px; background:#6c7086; border-radius:4px; }
+  .disk { height:24px; border-radius:6px; position:relative; z-index:1; margin-bottom:2px; }
+  button { margin-top:16px; padding:10px 20px; background:#89b4fa; color:#1e1e2e;
+           border:none; border-radius:8px; font-weight:bold; cursor:pointer; }
 </style>
 </head>
 <body>
@@ -20,15 +40,38 @@
 <div id="status">Подключение...</div>
 <div class="grid" id="grid"></div>
 
+<!-- Модалка состояния комнаты -->
+<div class="modal" id="roomModal">
+  <div class="modal-box">
+    <h2 id="modalTitle">Комната</h2>
+    <div class="sub" id="modalSub"></div>
+    <div id="viewBoard">
+      <div class="view-rod" data-rod="0"></div>
+      <div class="view-rod" data-rod="1"></div>
+      <div class="view-rod" data-rod="2"></div>
+    </div>
+    <button id="modalClose">Закрыть</button>
+  </div>
+</div>
+
 <script src="/socket.io/socket.io.js"></script>
 <script>
 const socket = io();
+const DISK_COUNT = 4;
+const COLORS = ['#f38ba8','#fab387','#f9e2af','#a6e3a1','#89b4fa','#cba6f7'];
+let rooms = [];
+
 socket.emit('admin:subscribe');
 
-socket.on('admin:update', (rooms) => {
+socket.on('admin:update', (data) => {
+  rooms = data;
+  renderList();
+});
+
+function renderList() {
   const status = document.getElementById('status');
   status.textContent = rooms.length
-    ? `Активных комнат: ${rooms.length}`
+    ? `Активных комнат: ${rooms.length} (клик по карточке — состояние)`
     : 'Пока нет активных комнат';
 
   const grid = document.getElementById('grid');
@@ -37,18 +80,58 @@ socket.on('admin:update', (rooms) => {
     const card = document.createElement('div');
     card.className = 'card';
     card.innerHTML = `
-      <h3>${r.roomId}</h3>
+      <h3>${escapeHtml(r.roomId)}</h3>
       <div class="${r.solved ? 'solved' : 'open'}">
         ${r.solved ? 'Решено' : 'В процессе'}
       </div>
-      <div>Игроков: ${r.players} · Ходов: ${r.moves}</div>
-      <div class="rods">
-        ${r.rods.map((rod, i) => `<span>${i + 1}: ${rod.join(',') || '—'}</span>`).join('')}
+      <div>Игроков: ${r.playerCount} · Ходов: ${r.moves}</div>
+      <div style="font-size:13px;color:#a6adc8;margin-top:6px;">
+        ${r.players.length ? escapeHtml(r.players.join(', ')) : '—'}
       </div>
     `;
+    card.addEventListener('click', () => openRoomModal(r.roomId));
     grid.appendChild(card);
   });
+}
+
+function openRoomModal(roomId) {
+  const r = rooms.find(x => x.roomId === roomId);
+  if (!r) return;
+
+  document.getElementById('modalTitle').textContent = `Комната: ${r.roomId}`;
+  document.getElementById('modalSub').textContent =
+    `${r.solved ? 'Решено' : 'В процессе'} · Игроков: ${r.playerCount} · ` +
+    `Ходов: ${r.moves} · ${r.players.join(', ') || 'нет игроков'}`;
+
+  document.querySelectorAll('#viewBoard .view-rod').forEach((el, i) => {
+    el.innerHTML = '';
+    r.rods[i].forEach(size => {
+      const d = document.createElement('div');
+      d.className = 'disk';
+      d.style.width = (30 + size * (150 / DISK_COUNT)) + 'px';
+      d.style.background = COLORS[(size - 1) % COLORS.length];
+      el.appendChild(d);
+    });
+  });
+
+  document.getElementById('roomModal').classList.add('open');
+}
+
+document.getElementById('modalClose').addEventListener('click', () => {
+  document.getElementById('roomModal').classList.remove('open');
 });
+
+// закрытие по клику на фон
+document.getElementById('roomModal').addEventListener('click', (e) => {
+  if (e.target.id === 'roomModal')
+    document.getElementById('roomModal').classList.remove('open');
+});
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
 </script>
 </body>
 </html>

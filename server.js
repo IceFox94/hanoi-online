@@ -8,17 +8,17 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 const PORT = process.env.PORT || 3000;
-const DISK_COUNT = 5;
+const DISK_COUNT = 4;
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Состояние всех комнат: { roomId: { rods, moves, players: Set } }
+// { roomId: { rods, moves, players: Map<socketId, name> } }
 const games = new Map();
 
 function createGame(roomId) {
   const rods = [[], [], []];
   for (let size = DISK_COUNT; size >= 1; size--) rods[0].push(size);
-  const game = { roomId, rods, moves: 0, players: 0 };
+  const game = { roomId, rods, moves: 0, players: new Map() };
   games.set(roomId, game);
   return game;
 }
@@ -28,25 +28,34 @@ function publicState(game) {
     roomId: game.roomId,
     rods: game.rods,
     moves: game.moves,
-    players: game.players,
+    players: Array.from(game.players.values()),
     solved: game.rods[2].length === DISK_COUNT,
   };
 }
 
 function adminSnapshot() {
-  return Array.from(games.values()).map(publicState);
+  return Array.from(games.values()).map(g => {
+    const s = publicState(g);
+    return { ...s, playerCount: g.players.size };
+  });
 }
 
 io.on('connection', (socket) => {
   console.log('connected:', socket.id);
 
   // --- Игрок ---
-  socket.on('join', ({ roomId }) => {
+  socket.on('join', ({ roomId, name }) => {
     if (!roomId) return;
     const game = games.get(roomId) || createGame(roomId);
-    socket.join(`room:${roomId}`);
+
+    // если переподключение — сохраняем имя
+    const finalName = (name || socket.data.name || 'Игрок').trim().slice(0, 30)
+      || 'Игрок';
+    socket.data.name = finalName;
     socket.data.roomId = roomId;
-    game.players = io.sockets.adapter.rooms.get(`room:${roomId}`)?.size || 1;
+
+    game.players.set(socket.id, finalName);
+    socket.join(`room:${roomId}`);
 
     io.to(`room:${roomId}`).emit('state', publicState(game));
     io.to('admin').emit('admin:update', adminSnapshot());
@@ -57,8 +66,8 @@ io.on('connection', (socket) => {
     if (!roomId) return;
     const game = games.get(roomId);
     if (!game) return;
-
     if (from === to) return;
+
     const disk = game.rods[from][game.rods[from].length - 1];
     if (disk === undefined) return;
     const topTo = game.rods[to][game.rods[to].length - 1];
@@ -78,9 +87,9 @@ io.on('connection', (socket) => {
   socket.on('reset', () => {
     const roomId = socket.data.roomId;
     if (!roomId) return;
+    const old = games.get(roomId);
     const game = createGame(roomId);
-    // сохраняем счётчик игроков
-    game.players = io.sockets.adapter.rooms.get(`room:${roomId}`)?.size || 1;
+    if (old) game.players = old.players;
     io.to(`room:${roomId}`).emit('state', publicState(game));
     io.to('admin').emit('admin:update', adminSnapshot());
   });
@@ -96,7 +105,8 @@ io.on('connection', (socket) => {
     if (roomId) {
       const game = games.get(roomId);
       if (game) {
-        game.players = io.sockets.adapter.rooms.get(`room:${roomId}`)?.size || 0;
+        game.players.delete(socket.id);
+        io.to(`room:${roomId}`).emit('state', publicState(game));
         io.to('admin').emit('admin:update', adminSnapshot());
       }
     }
@@ -105,4 +115,5 @@ io.on('connection', (socket) => {
 
 server.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
+});
 });
